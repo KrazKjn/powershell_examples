@@ -1,4 +1,4 @@
-# smtp_examples
+# powershell_examples
 PowerShell Examples
 
 ## Description
