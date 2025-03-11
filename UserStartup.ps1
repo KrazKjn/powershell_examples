@@ -21,6 +21,8 @@ param (
 # Retrieve system processor information and dynamically calculate the max CPU affinity value.
 $sysInfo = Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors
 $maxCPU = [math]::Pow(2, $sysInfo.NumberOfLogicalProcessors) - 1 # Max affinity bitmask (all processors)
+$currentUser = [Security.Principal.WindowsPrincipal]([Security.Principal.WindowsIdentity]::GetCurrent())
+$isAdministrator =$currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 # Function to modify priority and affinity of a running process.
 function Modify-Process {
@@ -58,16 +60,18 @@ function Modify-Process {
         foreach ($process in $processes) {
             Write-Host "Target Process Found: $($process.Id) - $($process.ProcessName)"
 
-            # Modify priority if necessary.
-            if ($process.PriorityClass -ne $ProcessPriority) {
-                Write-Host "   Changing Process Priority from: $($process.PriorityClass) to $ProcessPriority"
-                $process.PriorityClass = $ProcessPriority
-            }
+            if ($isAdministrator) {
+                # Modify priority if necessary.
+                if ($process.PriorityClass -ne $ProcessPriority) {
+                    Write-Host "   Changing Process Priority from: $($process.PriorityClass) to $ProcessPriority"
+                    $process.PriorityClass = $ProcessPriority
+                }
 
-            # Modify CPU affinity if within valid range.
-            if ($process.ProcessorAffinity -ne $ProcessorAffinity) {
-                Write-Host "   Changing Processor Affinity from: $($process.ProcessorAffinity) to $ProcessorAffinity"
-                $process.ProcessorAffinity = $ProcessorAffinity
+                # Modify CPU affinity if within valid range.
+                if ($process.ProcessorAffinity -ne $ProcessorAffinity) {
+                    Write-Host "   Changing Processor Affinity from: $($process.ProcessorAffinity) to $ProcessorAffinity"
+                    $process.ProcessorAffinity = $ProcessorAffinity
+                }
             }
         }
     } catch {
@@ -119,7 +123,7 @@ function Start-Process-Ext {
     try {
         # Build arguments for Start-Process
         $arguments = @{}
-        if ($AsAdmin) { $arguments['Verb'] = 'RunAs' }
+        if ($AsAdmin -and -not $isAdministrator) { $arguments['Verb'] = 'RunAs' }
         if ($ArgumentList) { $arguments['ArgumentList'] = $ArgumentList }
 
         $ExecutableName = [Environment]::ExpandEnvironmentVariables($ExecutableName)
@@ -128,15 +132,17 @@ function Start-Process-Ext {
         $process = Start-Process -FilePath $ExecutableName -PassThru @arguments
         Write-Host "Process Started: $($process.Id) - $($process.ProcessName)"
 
-        # Modify process attributes after starting.
-        if ($process.PriorityClass -ne $ProcessPriority) {
-            Write-Host "   Changing Process Priority to $ProcessPriority"
-            $process.PriorityClass = $ProcessPriority
-        }
+        if ($isAdministrator) {
+            # Modify process attributes after starting.
+            if ($process.PriorityClass -ne $ProcessPriority) {
+                Write-Host "   Changing Process Priority to $ProcessPriority"
+                $process.PriorityClass = $ProcessPriority
+            }
 
-        if ($process.ProcessorAffinity -ne $ProcessorAffinity) {
-            Write-Host "   Changing Processor Affinity to $ProcessorAffinity"
-            $process.ProcessorAffinity = $ProcessorAffinity
+            if ($process.ProcessorAffinity -ne $ProcessorAffinity) {
+                Write-Host "   Changing Processor Affinity to $ProcessorAffinity"
+                $process.ProcessorAffinity = $ProcessorAffinity
+            }
         }
     } catch {
         Write-Warning "Error starting process: $($_.Exception.Message)"
